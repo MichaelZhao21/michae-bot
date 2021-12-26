@@ -27,7 +27,7 @@ client.on('messageCreate', async (message) => {
     if (!message.content.startsWith(PREFIX) || message.author.bot) return;
 
     // Split message into arguments
-    const args = message.content.slice(PREFIX.length).trim().split(/ +/g);
+    const args = message.content.toLowerCase().slice(PREFIX.length).trim().split(/ +/g);
 
     // Don't process empty messages
     if (args.length === 0) return;
