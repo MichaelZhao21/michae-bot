@@ -6,8 +6,17 @@ const client = new Discord.Client({
 });
 
 const PREFIX = '!';
-
 const DATE_MAP = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const HELP_MESSAGE = `\`\`\`nim
+=================== Michae Bot Commands ===================
+1 !help             # Shows this message
+2 !roll (!r)        # Rolls for a random character
+3 !rollmale (!rm)   # Rolls for a male character
+4 !rollfemale (!rf) # Rolls for a female character
+5 !rollother (!ro)  # Rolls for a non male/female character
+===========================================================
+\`\`\`
+`;
 
 client.on('ready', () => {
     console.log(`Ready! Logged in as ${client.user.tag}`);
@@ -23,8 +32,10 @@ client.on('messageCreate', async (message) => {
     // Don't process empty messages
     if (args.length === 0) return;
 
-    // Call the roll function
-    if (args[0] === 'rollmale' || args[0] === 'rm') {
+    // Run command
+    if (args[0] === 'help') {
+        sendHelpMessage(message);
+    } else if (args[0] === 'rollmale' || args[0] === 'rm') {
         roll(message, 2);
     } else if (args[0] === 'rollfemale' || args[0] === 'rf') {
         roll(message, 1);
@@ -32,6 +43,8 @@ client.on('messageCreate', async (message) => {
         roll(message, 3);
     } else if (args[0] === 'roll' || args[0] === 'r') {
         roll(message, 0);
+    } else {
+        sendHelpMessage(message, true);
     }
 });
 
@@ -116,6 +129,17 @@ function randInt(min, max) {
  */
 function sendError(message) {
     message.channel.send('Could not fetch anime character data. Please try again later.');
+}
+
+/**
+ * Sends help/error messsage
+ * 
+ * @param {Discord.Message} message Discord message object 
+ * @param {boolean} error Whether or not to send an error message
+ */
+function sendHelpMessage(message, error) {
+    if (error) message.channel.send('Invalid command. Type `!help` for a list of commands.');
+    else message.channel.send(HELP_MESSAGE);
 }
 
 // Login using bot token
