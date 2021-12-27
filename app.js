@@ -9,12 +9,13 @@ const client = new Discord.Client({
         Discord.Intents.FLAGS.GUILD_MESSAGES,
         Discord.Intents.FLAGS.GUILD_MESSAGE_REACTIONS,
     ],
+    partials: ['MESSAGE', 'CHANNEL', 'REACTION'],
 });
 
 // Define constants
 const PREFIX = '!';
 const DATE_MAP = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-const EMOJI_NUMS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣'];
+const REACT_EMOJIS = ['⬅️', '➡️'];
 const HELP_MESSAGE = `**========================= Michae Bot Commands =========================**
 
 **!help** - Shows this message
@@ -30,7 +31,7 @@ const HELP_MESSAGE = `**========================= Michae Bot Commands ==========
 **!datelist (!dl)** - List all characters you are dating (heart react to date characters)
 
 :mag: **Search** :mag:
-**!search <name> [#] (!s <name> [#])** - Search for a character by name (and position on list if multiple)
+**!search <name> (!s <name>)** - Search for a character by name (and position on list if multiple)
 
 **===================================================================**
 `;
@@ -38,6 +39,7 @@ const HELP_MESSAGE = `**========================= Michae Bot Commands ==========
 // TODO: ADD THIS
 // **!date <name> [#] (!d <name> [#])** - Date a rolled character (up to the last 100 rolled)
 // **!breakup <name> [#] (!br <name> [#])** - Stop dating a character (IRREVERSIBLE!!!)
+// **!simp <name>** - Look through a characters' photos
 
 // Character class
 class Character {
@@ -219,6 +221,7 @@ async function searchCharacter(message, args) {
     // Search for the character
     const name = args.slice(1).join(' ');
     const char = await internalSearch(message, name);
+    console.log(char);
     if (char === -1) return;
     else if (char) {
         sendCharacter(message, char);
@@ -230,23 +233,19 @@ async function searchCharacter(message, args) {
 /**
  * Internal method that searches for a character based on the following method:
  *
- * If an exact match is found, send that one character to the user.
- * If multiple exact matches are found, send the list to the user to pick from using reaction listeners.
- *
- * Otherwise, if multiple are found, sends the list to the user.
  * If only one is found, send that one character to the user.
- *
+ * Otherwise, if multiple are found, sends the list to the user and let them pick.
  * Otherwise, if no character is found, send an error message to the user.
  *
  * @param {Discord.Message} message Discord message object
- * @param {String[]} name Name of the character to search for
+ * @param {String[]} search Name of the character to search for
  * @returns {Promise<Character>} Character object
  */
-async function internalSearch(message, name) {
+async function internalSearch(message, search) {
     try {
         // Get character query list
         const data = await fetch(
-            `https://www.animecharactersdatabase.com/api_series_characters.php?character_q=${name}`,
+            `https://www.animecharactersdatabase.com/api_series_characters.php?character_q=${search}`,
             {
                 headers: {
                     'User-Agent':
@@ -259,79 +258,137 @@ async function internalSearch(message, name) {
         if (data === -1) return null;
 
         // Create character list
-        let characters = data.search_results;
-        let exact = false;
-
-        // Check to see if there is an exact match
-        // If so, filter the list and use it as the search result list
-        const exactMatches = data.search_results.filter(
-            (char) => char.name.toLowerCase() === name.toLowerCase()
-        );
-        if (exactMatches.length !== 0) {
-            characters = exactMatches;
-            exact = true;
-        }
+        const characterList = data.search_results;
 
         // If there is only one character, return that character
-        if (characters.length === 1) {
-            return characters[0];
+        if (characterList.length === 1) {
+            return characterList[0];
         }
 
         // If no characters are found, return null
-        if (characters.length === 0) {
+        if (characterList.length === 0) {
             return null;
         }
 
-        // If there are not exact matches, send list to user and return null
-        if (!exact) {
-            // Split the char list if > 50
-            let characters2 = [];
-            if (characters.length > 50) {
-                characters2 = characters.slice(50);
-                characters = characters.slice(0, 50);
+        // ELSE: Multiple characters found, send list to user
+        // and let them pick from a list
+
+        // Page counter
+        let page = 0;
+    
+        // Show the list of characters
+        const queryMessage = await showPickerEmbed(message, search, characterList);
+    
+        // React with emojis
+        react(queryMessage, REACT_EMOJIS);
+    
+        // Listen for an emoji reaction
+        const filter = (reaction, user) => {
+            return user.id === message.author.id && REACT_EMOJIS.includes(reaction.emoji.name);
+        };
+        const collector = queryMessage.createReactionCollector({ filter, time: 60000 });
+        collector.on('collect', async (collected) => {
+            // Get first reaction
+            const reaction = collected.emoji.name;
+    
+            // Remove user's reaction
+            queryMessage.reactions.cache
+                .filter((reaction) => reaction.users.cache.has(message.author.id))
+                .first()
+                .users.remove(message.author.id);
+    
+            // Arrow and cancel emoji actions
+            if (reaction === REACT_EMOJIS[0]) {
+                // Left arrow emoji
+                page = page > 0 ? page - 1 : page;
+                showPickerEmbed(message, search, characterList, page, queryMessage);
+            } else if (reaction === REACT_EMOJIS[1]) {
+                // Right arrow emoji
+                page = characterList.length > 10 * (page + 1) ? page + 1 : page;
+                showPickerEmbed(message, search, characterList, page, queryMessage);
             }
-            sendCharacterList(name, message, characters);
-            if (characters2.length > 0) sendCharacterList(name, message, characters2, true);
-
-            return -1;
-        }
-
-        // Else if there ARE exact matches, allow for user to pick
-        // Map the characters to a list of strings
-        const desc = characters
-            .map((char) => `**${char.name}** *(${char.gender})* - ${char.anime_name}\n`)
-            .join('');
-        const embed = new Discord.MessageEmbed()
-            .setTitle(`Pick the Character (name: *${name}*)`)
-            .setDescription(desc);
-        const queryMessage = await message.channel.send({ embeds: [embed] });
-        const emojis = EMOJI_NUMS.slice(0, characters.length);
-        for (let i = 0; i < emojis.length; i++) {
-            const emoji = emojis[i];
-            await queryMessage.react(emoji);
-        }
-
-        // Listen for reactions
+        });
+    
+        // Listen for replies
         return new Promise((resolve) => {
-            const filter = (reaction, user) => {
-                return emojis.includes(reaction.emoji.name) && user.id === message.author.id;
-            };
-            queryMessage
-                .awaitReactions({ filter, max: 1, time: 60000, errors: ['time'] })
-                .then((collected) => {
-                    const reaction = collected.first();
-                    const index = emojis.indexOf(reaction.emoji.name);
-                    queryMessage.reactions.removeAll();
-                    resolve(characters[index]);
+            const filter = (m) => m.author.id === message.author.id;
+            queryMessage.channel
+                .awaitMessages({ filter, max: 1, time: 60000, errors: ['time'] })
+                .then(async (message) => {
+                    try {
+                        // Get the character
+                        const char = characterList[parseInt(message.first().content) - 1];
+    
+                        // If the character is not found, send error message
+                        if (!char) {
+                            queryMessage.channel.send('Invalid character number.');
+                            return resolve(null);
+                        }
+    
+                        // Else, return the character
+                        return resolve(char);
+                    } catch (err) {
+                        message.channel.send('Invalid number was entered!');
+                        return resolve(-1);
+                    }
                 })
                 .catch(() => {
-                    queryMessage.reactions.removeAll();
                     resolve(-1);
                 });
         });
     } catch (err) {
         console.error(err);
         return null;
+    }
+}
+
+/**
+ * Sends a list of characters to the user to pick from. This can be edited through
+ * additional function calls
+ *
+ * @param {Discord.Message} message Discord message object
+ * @param {string} search Original search query
+ * @param {Character[]} characterList List of characters
+ * @param {number} page Page number
+ * @param {Discord.Message} [prevMessage] If the message should be edited instead of sent, include this param
+ * @returns {Promise<Discord.Message>} The picker message sent or edited
+ */
+async function showPickerEmbed(message, search, characterList, page = 0, prevMessage = null) {
+    // If the character list is greater than 10, split it into two lists, with the current list containing the 1st 10 entries
+    const currList =
+        characterList.length > 10 ? characterList.slice(page * 10, (page + 1) * 10) : characterList;
+
+    // Create the Embed and display it
+    const desc = currList
+        .map(
+            (char, index) =>
+                `${page * 10 + index + 1}. **${char.name}** *(${char.gender})* - ${
+                    char.anime_name
+                }\n`
+        )
+        .join('');
+    const embed = new Discord.MessageEmbed()
+        .setTitle(`Search results for *${search}* ${page > 0 ? `[Page ${page + 1}]` : ''}`)
+        .setDescription('**Enter a number to pick a character:**\n' + desc)
+        .setFooter(`Searched by ${message.author.username}`, message.author.avatarURL());
+
+    // Edit or send message depending on if it is a recursive call
+    const queryMessage = prevMessage
+        ? await prevMessage.edit({ embeds: [embed] })
+        : await message.channel.send({ embeds: [embed] });
+
+    return queryMessage;
+}
+
+/**
+ * React to given message with emojis in order
+ *
+ * @param {Discord.Message} message Discord message object
+ * @param {string[]} emojiList List of emojis to react with
+ */
+async function react(message, emojiList) {
+    for (let i = 0; i < emojiList.length; i++) {
+        await message.react(emojiList[i]);
     }
 }
 
@@ -383,7 +440,7 @@ async function sendCharacter(message, character, isRoll) {
         .setImage(character.character_image.replace(/\/.\//g, '/'));
 
     // Add rolled by footer
-    if (isRoll) embed.setFooter(`Rolled by ${message.author.username}`);
+    if (isRoll) embed.setFooter(`Rolled by ${message.author.username}`, message.author.avatarURL());
 
     // Send to channel
     return await message.channel.send({ embeds: [embed] });
@@ -409,7 +466,7 @@ async function sendCharacterList(name, message, characterList, page = 1, dating)
                     ? `Characters ${message.author.username} ${
                           dating === 1 ? 'are Dating' : 'have Rolled'
                       }!`
-                    : `Search Results for **${name}**`
+                    : `Search Results for **${name}** (Select Character or Refine Results)`
             } ${page !== 1 ? `(Page ${page})` : ''}`
         )
         .setDescription(desc);
