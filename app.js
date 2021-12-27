@@ -326,9 +326,6 @@ async function internalSearch(message, name) {
                 })
                 .catch(() => {
                     queryMessage.reactions.removeAll();
-                    queryMessage.reply(
-                        `${message.author} You were too slow! No character selected.`
-                    );
                     resolve(-1);
                 });
         });
