@@ -275,13 +275,13 @@ async function internalSearch(message, search) {
 
         // Page counter
         let page = 0;
-    
+
         // Show the list of characters
         const queryMessage = await showPickerEmbed(message, search, characterList);
-    
+
         // React with emojis
         react(queryMessage, REACT_EMOJIS);
-    
+
         // Listen for an emoji reaction
         const filter = (reaction, user) => {
             return user.id === message.author.id && REACT_EMOJIS.includes(reaction.emoji.name);
@@ -290,13 +290,13 @@ async function internalSearch(message, search) {
         collector.on('collect', async (collected) => {
             // Get first reaction
             const reaction = collected.emoji.name;
-    
+
             // Remove user's reaction
             queryMessage.reactions.cache
                 .filter((reaction) => reaction.users.cache.has(message.author.id))
                 .first()
                 .users.remove(message.author.id);
-    
+
             // Arrow and cancel emoji actions
             if (reaction === REACT_EMOJIS[0]) {
                 // Left arrow emoji
@@ -308,7 +308,7 @@ async function internalSearch(message, search) {
                 showPickerEmbed(message, search, characterList, page, queryMessage);
             }
         });
-    
+
         // Listen for replies
         return new Promise((resolve) => {
             const filter = (m) => m.author.id === message.author.id;
@@ -318,13 +318,13 @@ async function internalSearch(message, search) {
                     try {
                         // Get the character
                         const char = characterList[parseInt(message.first().content) - 1];
-    
+
                         // If the character is not found, send error message
                         if (!char) {
                             queryMessage.channel.send('Invalid character number.');
                             return resolve(null);
                         }
-    
+
                         // Else, return the character
                         return resolve(char);
                     } catch (err) {
@@ -403,17 +403,53 @@ async function history(message, option) {
     const currUser = await User.findOne({ id: message.author.id });
     let list = currUser ? (option === 1 ? currUser.dating : currUser.rolls) : [];
 
+    // Send empty list if empty
     if (list.length === 0) {
-        sendCharacterList(null, message, [], 1, option);
+        sendHistoryList(message, [], 1, option);
         return;
     }
 
-    let pageCount = 1;
-    while (list.length > 0) {
-        const currPage = list.slice(0, 50);
-        list = list.slice(50);
-        sendCharacterList(null, message, currPage, pageCount++, option);
-    }
+    // Page number counter
+    let page = 0;
+
+    // Show the list of characters
+    const histMessage = await sendHistoryList(message, list, page, option);
+
+    // React with emojis
+    react(histMessage, REACT_EMOJIS);
+
+    // Listen for an emoji reaction
+    const filter = (reaction, user) => {
+        return user.id === message.author.id && REACT_EMOJIS.includes(reaction.emoji.name);
+    };
+    const collector = histMessage.createReactionCollector({ filter, time: 60000 });
+    collector.on('collect', async (collected) => {
+        // Get first reaction
+        const reaction = collected.emoji.name;
+
+        // Remove user's reaction
+        histMessage.reactions.cache
+            .filter((reaction) => reaction.users.cache.has(message.author.id))
+            .first()
+            .users.remove(message.author.id);
+
+        // Arrow and cancel emoji actions
+        if (reaction === REACT_EMOJIS[0]) {
+            // Left arrow emoji
+            page = page > 0 ? page - 1 : page;
+            sendHistoryList(message, list, page, option, histMessage);
+        } else if (reaction === REACT_EMOJIS[1]) {
+            // Right arrow emoji
+            page = list.length > 10 * (page + 1) ? page + 1 : page;
+            sendHistoryList(message, list, page, option, histMessage);
+        }
+    });
+    // let pageCount = 1;
+    // while (list.length > 0) {
+    //     const currPage = list.slice(0, 50);
+    //     list = list.slice(50);
+    //     sendCharacterList(null, message, currPage, pageCount++, option);
+    // }
     return;
 }
 
@@ -447,30 +483,30 @@ async function sendCharacter(message, character, isRoll) {
 }
 
 /**
- * Send list of characters to user
+ * Send list of characters from rolls/dating to user
  *
- * @param {string} name Name of the search
  * @param {Discord.Message} message Discord message object
  * @param {Character[]} characterList List of characters to send
  * @param {number} [page] Page number
- * @param {number} [dating] Is this the dating/rolls history (1/2)
+ * @param {number} option Dating list (1) or roll history (2)
+ * @param {Discord.Message} [prevMessage] If the message should be edited instead of sent, include this param
+ * @returns {Promise<Discord.Message>} The picker message sent
  */
-async function sendCharacterList(name, message, characterList, page = 1, dating) {
-    const desc = characterList
+async function sendHistoryList(message, characterList, page = 0, option, prevMessage) {
+    const currList = characterList.slice(page * 10, (page + 1) * 10);
+    const desc = currList
         .map((char) => `**${char.name}** *(${char.gender})* - ${char.anime_name || char.origin}\n`)
         .join('');
     const embed = new Discord.MessageEmbed()
         .setTitle(
-            `${
-                dating
-                    ? `Characters ${message.author.username} ${
-                          dating === 1 ? 'are Dating' : 'have Rolled'
-                      }!`
-                    : `Search Results for **${name}** (Select Character or Refine Results)`
-            } ${page !== 1 ? `(Page ${page})` : ''}`
+            `Characters ${message.author.username} ${
+                option === 1 ? 'are Dating' : 'have Rolled'
+            }! ${characterList.length > 10 ? `(Page ${page + 1} / ${Math.ceil(characterList.length / 10)})` : ''}`
         )
         .setDescription(desc);
-    await message.channel.send({ embeds: [embed] });
+    return prevMessage
+        ? await prevMessage.edit({ embeds: [embed] })
+        : await message.channel.send({ embeds: [embed] });
 }
 
 /**
