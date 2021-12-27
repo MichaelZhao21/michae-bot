@@ -383,7 +383,7 @@ async function sendCharacter(message, character, isRoll) {
         .setImage(character.character_image.replace(/\/.\//g, '/'));
 
     // Add rolled by footer
-    if (isRoll) embed.setFooter(`Rolled by ${message.author}`);
+    if (isRoll) embed.setFooter(`Rolled by ${message.author.username}`);
 
     // Send to channel
     return await message.channel.send({ embeds: [embed] });
