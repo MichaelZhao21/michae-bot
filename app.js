@@ -173,7 +173,7 @@ async function roll(message, gender) {
             { upsert: true }
         );
 
-        const rollMessage = await sendCharacter(message, pick);
+        const rollMessage = await sendCharacter(message, pick, true);
         await rollMessage.react('💗');
 
         // Listen for reactions
@@ -367,8 +367,9 @@ async function history(message, option) {
  *
  * @param {Discord.Message} message Discord message object
  * @param {Character} character Character object
+ * @param {boolean} [isRoll] True if the character is a roll
  */
-async function sendCharacter(message, character) {
+async function sendCharacter(message, character, isRoll) {
     // Create MessageEmbed with info on character
     const embed = new Discord.MessageEmbed()
         .setTitle(character.name)
@@ -380,6 +381,9 @@ async function sendCharacter(message, character) {
             }\n\n${character.desc}`
         )
         .setImage(character.character_image.replace(/\/.\//g, '/'));
+
+    // Add rolled by footer
+    if (isRoll) embed.setFooter(`Rolled by ${message.author}`);
 
     // Send to channel
     return await message.channel.send({ embeds: [embed] });

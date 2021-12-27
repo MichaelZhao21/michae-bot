@@ -4,7 +4,18 @@ Self-hosted discord bot that allows you to roll for random anime characters! (WI
 
 ## Hosting
 
-Host the bot on your own server! This can be run with something like Heroku. Simply clone the repo and run:
+Host the bot on your own server! This can be run with something like Heroku. Simply clone the repo, update the environmental variables, and run:
+
+### .env File
+
+```
+TOKEN=[Discord bot token]
+MONGO_USER=[MongoDB Username]
+MONGO_PASS=[MongoDB Password]
+MONGO_URL=[MongoDB URL]
+```
+
+### Running
 
 ```
 yarn install
