@@ -25,7 +25,7 @@ db.once('open', async () => {
 
     // Iterate through collection
     for await (const doc of Character.find([{ $sort: { name: 1 } }])) {
-        updateFavoriteCount(doc, ++count, total);
+        await updateFavoriteCount(doc, ++count, total);
     }
 
     db.close();
