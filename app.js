@@ -154,10 +154,12 @@ async function roll(message) {
                 // Make sure user is not already dating character
                 const dating = await User.findOne({ id: message.author.id, dating: char.id });
                 if (dating) {
-                    rollMessage.channel.send(`${message.author.username} You are already dating ${char.name}!`);
+                    rollMessage.channel.send(
+                        `${message.author.username} You are already dating ${char.name}!`
+                    );
                     return;
                 }
-                
+
                 // Save character in DB
                 await User.updateOne(
                     { id: message.author.id },
@@ -330,7 +332,7 @@ async function showPickerEmbed(message, search, characterList, page = 0, prevMes
         )
         .join('');
     const embed = new Discord.MessageEmbed()
-        .setTitle('**Enter a number to pick a character:**\n')
+        .setTitle(`Enter a number to pick a character (*search: ${search}*):\n`)
         .setDescription(desc)
         .setFooter(`Searched by ${message.author.username}`, message.author.avatarURL());
 
@@ -359,7 +361,6 @@ async function react(message, emojiList) {
  *
  * @param {Discord.Message} message Discord message object
  * @param {1 | 2} option Option number (1 is dating, 2 is rolls)
- * @returns
  */
 async function history(message, option) {
     const currUser = await User.findOne({ id: message.author.id });
@@ -427,10 +428,9 @@ async function simp(message, args) {
 
 /**
  * Breakup with a character, if they are in your dating list
- * 
+ *
  * @param {Discord.Message} message Discord message object
  * @param {string[]} args List of arguments
- * @returns 
  */
 async function breakup(message, args) {
     try {
@@ -481,12 +481,19 @@ async function breakup(message, args) {
  * @param {boolean} [isRoll] True if the character is a roll
  */
 async function sendCharacter(message, character, isRoll) {
+    // Get favorite count for user
+    const favoriteCount = character.favorites
+        ? character.favorites
+        : await getAndUpdateFavoriteCount(character.id);
+
     // Create MessageEmbed with info on character
     const embed = new Discord.MessageEmbed()
         .setTitle(character.name)
         .setURL(character.url)
         .setColor('#86f9f9')
-        .setDescription(`**${character.media}**:  ${character.mediaName}`)
+        .setDescription(
+            `**${character.media}**: ${character.mediaName}\n**Likes**: ${favoriteCount}`
+        )
         .setImage(character.img);
 
     // Add rolled by footer
@@ -530,6 +537,55 @@ async function sendHistoryList(message, characterList, page = 0, option, prevMes
     return prevMessage
         ? await prevMessage.edit({ embeds: [embed] })
         : await message.channel.send({ embeds: [embed] });
+}
+
+/**
+ * Updates the favorite count for a character and returns it.
+ * Will return null if the favorite count for a character cannot be loaded.
+ *
+ * @param {number} id Character ID
+ * @returns {Promise<number>} Favorite count for the given character
+ */
+async function getAndUpdateFavoriteCount(id) {
+    // Get character from DB and data from API
+    const char = await Character.findOne({ id });
+    const html = await fetch(char.url).then((res) => res.text());
+
+    // Check if the page is throttled
+    while (isThrottled(html)) {
+        console.log(`ERROR: Connection throttled on ${new Date().toTimeString()}!`);
+        return null;
+    }
+
+    // Parse favorites and save
+    const favorites = getFavorites(html);
+    if (favorites === null) {
+        console.log(`${char.name} - ERROR: Could not find favorites`);
+    } else {
+        await char.updateOne({ favorites });
+        return favorites;
+    }
+}
+
+/**
+ * Finds the number of favorites for each character in the list
+ *
+ * @param {string} html HTML to parse
+ * @returns {number} Number of favorites
+ */
+function getFavorites(html) {
+    try {
+        const num = Number.parseInt(
+            html
+                .replace(/.*Member Favorites: (.*?)<\/td>.*/gs, '$1')
+                .replace(',', '')
+                .trim()
+        );
+        if (isNaN(num)) return null;
+        return num;
+    } catch (err) {
+        return null;
+    }
 }
 
 /**
@@ -637,6 +693,17 @@ function sendError(message) {
     message.channel.send(
         'Could not process your request :( Please try again later or contact the developer.'
     );
+}
+
+/**
+ * Checks to see if the current page is throttled bc too many bot requests.
+ * This can be easily bypassed by manually telling the site that it is a human!
+ *
+ * @param {string} html HTML string
+ * @returns {boolean} True if the current page is throttled
+ */
+function isThrottled(html) {
+    return html.includes('We are temporarily restricting site connections due to heavy access.');
 }
 
 /**
