@@ -8,6 +8,7 @@ const characterSchema = new mongoose.Schema(
         name: String,
         media: String,
         mediaName: String,
+        favorites: Number,
     },
     { collection: 'anime-db' }
 );

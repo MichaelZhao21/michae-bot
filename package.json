@@ -13,7 +13,8 @@
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
-    "scrape": "node scrape.js"
+    "scrape": "node scrape.js",
+    "scrape:favorites": "node scrape-favorites.js"
   },
   "devDependencies": {
     "nodemon": "^2.0.15"
