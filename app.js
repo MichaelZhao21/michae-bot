@@ -32,14 +32,18 @@ const HELP_MESSAGE = `**========================= Michae Bot Commands ==========
 
 :mag: **Search** :mag:
 **!search <name> (!s <name>)** - Search for a character by name (and position on list if multiple)
+**!simp <name>** - Look through a characters' photos
 
 **===================================================================**
 `;
+const PINTEREST_1 =
+    'https://www.pinterest.com/resource/BaseSearchResource/get/?data=%7B%22options%22%3A%7B%22article%22%3Anull%2C%22appliedProductFilters%22%3A%22---%22%2C%22auto_correction_disabled%22%3Afalse%2C%22corpus%22%3Anull%2C%22customized_rerank_type%22%3Anull%2C%22filters%22%3Anull%2C%22query%22%3A%22';
+const PINTEREST_2 =
+    '%22%2C%22query_pin_sigs%22%3Anull%2C%22redux_normalize_feed%22%3Atrue%2C%22rs%22%3A%22typed%22%2C%22scope%22%3A%22pins%22%2C%22source_id%22%3Anull%2C%22no_fetch_context_on_resource%22%3Afalse%7D%2C%22context%22%3A%7B%7D%7D&_=1640629902230';
 
 // TODO: ADD THIS
 // **!date <name> [#] (!d <name> [#])** - Date a rolled character (up to the last 100 rolled)
 // **!breakup <name> [#] (!br <name> [#])** - Stop dating a character (IRREVERSIBLE!!!)
-// **!simp <name>** - Look through a characters' photos
 
 // Character class
 class Character {
@@ -116,6 +120,9 @@ client.on('messageCreate', async (message) => {
         case 'search':
         case 's':
             searchCharacter(message, args);
+            break;
+        case 'simp':
+            simp(message, args);
             break;
         default:
             sendHelpMessage(message, true);
@@ -221,7 +228,7 @@ async function searchCharacter(message, args) {
     // Search for the character
     const name = args.slice(1).join(' ');
     const char = await internalSearch(message, name);
-    console.log(char);
+
     if (char === -1) return;
     else if (char) {
         sendCharacter(message, char);
@@ -238,7 +245,7 @@ async function searchCharacter(message, args) {
  * Otherwise, if no character is found, send an error message to the user.
  *
  * @param {Discord.Message} message Discord message object
- * @param {String[]} search Name of the character to search for
+ * @param {string} search Name of the character to search for
  * @returns {Promise<Character>} Character object
  */
 async function internalSearch(message, search) {
@@ -444,13 +451,24 @@ async function history(message, option) {
             sendHistoryList(message, list, page, option, histMessage);
         }
     });
-    // let pageCount = 1;
-    // while (list.length > 0) {
-    //     const currPage = list.slice(0, 50);
-    //     list = list.slice(50);
-    //     sendCharacterList(null, message, currPage, pageCount++, option);
-    // }
-    return;
+}
+
+/**
+ * Display a picture viewer of a certain character
+ *
+ * @param {Discord.Message} message Discord message object
+ * @param {string[]} args List of arguments
+ */
+async function simp(message, args) {
+    const name = args.slice(1).join(' ');
+    const char = await internalSearch(message, name);
+
+    if (char === -1) return;
+    else if (char) {
+        sendPictureGallery(message, char);
+    } else {
+        message.channel.send(`Couldn't find character **${name}**.`);
+    }
 }
 
 // =============== UTILITY FUNCTIONS ===============
@@ -501,12 +519,105 @@ async function sendHistoryList(message, characterList, page = 0, option, prevMes
         .setTitle(
             `Characters ${message.author.username} ${
                 option === 1 ? 'are Dating' : 'have Rolled'
-            }! ${characterList.length > 10 ? `(Page ${page + 1} / ${Math.ceil(characterList.length / 10)})` : ''}`
+            }! ${
+                characterList.length > 10
+                    ? `(Page ${page + 1} / ${Math.ceil(characterList.length / 10)})`
+                    : ''
+            }`
         )
         .setDescription(desc);
     return prevMessage
         ? await prevMessage.edit({ embeds: [embed] })
         : await message.channel.send({ embeds: [embed] });
+}
+
+/**
+ * Shows a picture gallery of a character
+ *
+ * @param {Discord.Message} message Discord message object
+ * @param {Character} character Character object
+ */
+async function sendPictureGallery(message, character) {
+    const data = await fetch(
+        `${PINTEREST_1}${(
+            character.name +
+            ' ' +
+            (character.origin || character.anime_name)
+        ).replace(/ /g, '%20')}${PINTEREST_2}`,
+        {
+            headers: {
+                'User-Agent':
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:95.0) Gecko/20100101 Firefox/95.0',
+            },
+        }
+    ).then((res) => res.json());
+
+    // Process data
+    const rawList = data.resource_response.data.results;
+    const imgList = rawList.map((item) => ({
+        url: item.images.orig.url,
+        id: item.id,
+        dominant_color: item.dominant_color,
+    }));
+    const name = character.name;
+
+    // Page counter
+    let page = 0;
+
+    // Create initial message
+    const pictureMessage = await displayPicture(message, name, imgList, page);
+
+    // React with emojis
+    react(pictureMessage, REACT_EMOJIS);
+
+    // Listen for an emoji reaction
+    const filter = (reaction, user) => {
+        return user.id === message.author.id && REACT_EMOJIS.includes(reaction.emoji.name);
+    };
+    const collector = pictureMessage.createReactionCollector({ filter, time: 60000 });
+    collector.on('collect', async (collected) => {
+        // Get first reaction
+        const reaction = collected.emoji.name;
+
+        // Remove user's reaction
+        pictureMessage.reactions.cache
+            .filter((reaction) => reaction.users.cache.has(message.author.id))
+            .first()
+            .users.remove(message.author.id);
+
+        // Arrow and cancel emoji actions
+        if (reaction === REACT_EMOJIS[0]) {
+            // Left arrow emoji
+            page = page > 0 ? page - 1 : page;
+            displayPicture(message, name, imgList, page, pictureMessage);
+        } else if (reaction === REACT_EMOJIS[1]) {
+            // Right arrow emoji
+            page = imgList.length > page ? page + 1 : page;
+            displayPicture(message, name, imgList, page, pictureMessage);
+        }
+    });
+}
+
+/**
+ * Displays a character's picture with a pageable display
+ *
+ * @param {Discord.Message} message Discord message object
+ * @param {string} name Name of the character
+ * @param {Object[]} imgList List of images to display
+ * @param {number} page Page number
+ * @param {Discord.Message} [prevMessage] If the message should be edited instead of sent, include this param
+ */
+async function displayPicture(message, name, imgList, page = 0, prevMessage) {
+    const embed = new Discord.MessageEmbed()
+        .setTitle(`${name} (${page + 1}/${imgList.length})`)
+        .setImage(imgList[page].url)
+        .setURL(`https://www.pinterest.com/pin/${imgList[page].id}/`)
+        .setColor(imgList[page].dominant_color)
+        .setFooter(`Pictures requested by ${message.author.username}`, message.author.avatarURL());
+
+    return prevMessage
+        ? prevMessage.edit({ embeds: [embed] })
+        : message.channel.send({ embeds: [embed] });
 }
 
 /**
