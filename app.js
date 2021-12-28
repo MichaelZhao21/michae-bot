@@ -1,7 +1,8 @@
 require('dotenv').config();
 const Discord = require('discord.js');
 const fetch = require('node-fetch');
-const User = require('./User');
+const User = require('./models/User');
+const Character = require('./models/Character');
 const mongoose = require('mongoose');
 const client = new Discord.Client({
     intents: [
@@ -14,7 +15,6 @@ const client = new Discord.Client({
 
 // Define constants
 const PREFIX = '!';
-const DATE_MAP = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const REACT_EMOJIS = ['⬅️', '➡️'];
 const HELP_MESSAGE = `**========================= Michae Bot Commands =========================**
 
@@ -22,16 +22,13 @@ const HELP_MESSAGE = `**========================= Michae Bot Commands ==========
 
 :game_die: **Rolling** :game_die:
 **!roll (!r)** - Rolls a random character
-**!rollmale (!rm)** - Rolls a male character
-**!rollfemale (!rf)** - Rolls a female character
-**!rollother (!ro)** - Rolls a non male/female character
 **!rollhistory (!rh)** - Shows your roll history up to the past 100 rolls
 
 :heart: **Dating** :heart:
 **!datelist (!dl)** - List all characters you are dating (heart react to date characters)
 
 :mag: **Search** :mag:
-**!search <name> (!s <name>)** - Search for a character by name (and position on list if multiple)
+**!search <name> (!s <name>)** - Search for a character by name
 **!simp <name>** - Look through a characters' photos
 
 **===================================================================**
@@ -40,25 +37,30 @@ const PINTEREST_1 =
     'https://www.pinterest.com/resource/BaseSearchResource/get/?data=%7B%22options%22%3A%7B%22article%22%3Anull%2C%22appliedProductFilters%22%3A%22---%22%2C%22auto_correction_disabled%22%3Afalse%2C%22corpus%22%3Anull%2C%22customized_rerank_type%22%3Anull%2C%22filters%22%3Anull%2C%22query%22%3A%22';
 const PINTEREST_2 =
     '%22%2C%22query_pin_sigs%22%3Anull%2C%22redux_normalize_feed%22%3Atrue%2C%22rs%22%3A%22typed%22%2C%22scope%22%3A%22pins%22%2C%22source_id%22%3Anull%2C%22no_fetch_context_on_resource%22%3Afalse%7D%2C%22context%22%3A%7B%7D%7D&_=1640629902230';
+let DB_COUNT = 0;
 
 // TODO: ADD THIS
 // **!date <name> [#] (!d <name> [#])** - Date a rolled character (up to the last 100 rolled)
 // **!breakup <name> [#] (!br <name> [#])** - Stop dating a character (IRREVERSIBLE!!!)
 
 // Character class
-class Character {
-    constructor(char) {
-        this.id = char.id;
-        this.origin = char.origin;
-        this.anime_name = char.anime_name;
-        this.gender = char.gender;
-        this.name = char.name;
+class AnimeCharacter {
+    constructor(url, img, name, media, mediaName) {
+        this.id = id;
+        this.url = url;
+        this.img = img;
+        this.name = name;
+        this.media = media;
+        this.mediaName = mediaName;
     }
 }
 
 // Connect mongoose to server
 const mongoURL = `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASS}@${process.env.MONGO_URL}/data?retryWrites=true&w=majority`;
-mongoose.connect(mongoURL, { useNewUrlParser: true, useUnifiedTopology: true });
+mongoose.connect(mongoURL, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+});
 
 // Callbacks for db connections
 const db = mongoose.connection;
@@ -66,7 +68,11 @@ db.on('error', (error) => {
     console.error(error);
     process.exit(1);
 });
-db.once('open', () => console.log('Connected to mongodb database!'));
+db.once('open', async () => {
+    console.log('Connected to mongodb database!');
+    DB_COUNT = await Character.count({});
+    console.log(`There are ${DB_COUNT} characters in the database.`);
+});
 
 // When the bot is ready
 client.on('ready', () => {
@@ -92,18 +98,6 @@ client.on('messageCreate', async (message) => {
         case 'roll':
         case 'r':
             roll(message, 0);
-            break;
-        case 'rollfemale':
-        case 'rf':
-            roll(message, 1);
-            break;
-        case 'rollmale':
-        case 'rm':
-            roll(message, 2);
-            break;
-        case 'rollother':
-        case 'ro':
-            roll(message, 3);
             break;
         case 'rollhistory':
         case 'rh':
@@ -138,51 +132,19 @@ client.on('messageCreate', async (message) => {
  * @param {string[]} args Array of arguments
  * @param {number} gender 0 for any, 1 for female, 2 for male, 3 for other
  */
-async function roll(message, gender) {
-    const month = randInt(1, 13);
-    const day = randInt(1, DATE_MAP[month - 1] + 1);
-
+async function roll(message) {
     try {
-        const data = await fetch(
-            `https://www.animecharactersdatabase.com/api_series_characters.php?month=${month}&day=${day}`,
-            {
-                headers: {
-                    'User-Agent':
-                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:95.0) Gecko/20100101 Firefox/95.0',
-                },
-            }
-        ).then((res) => res.json());
-
-        // Filter character data based on gender
-        const characters = data.characters;
-        let filteredCharacters = characters;
-        if (gender === 1) {
-            filteredCharacters = characters.filter((char) => char.gender === 'Female');
-        } else if (gender === 2) {
-            filteredCharacters = characters.filter((char) => char.gender === 'Male');
-        } else if (gender === 3) {
-            filteredCharacters = characters.filter(
-                (char) => char.gender !== 'Male' && char.gender !== 'Female'
-            );
-        }
-
-        // If filtered list is empty, refetch character
-        if (filteredCharacters.length === 0) {
-            roll(message, gender);
-            return;
-        }
-
-        // Pick a random char from the filtered list
-        const pick = filteredCharacters[randInt(0, filteredCharacters.length - 1)];
+        // Get a random character from the database
+        const char = await Character.findOne().skip(randInt(0, DB_COUNT)).exec();
 
         // Save character in DB
         await User.updateOne(
             { id: message.author.id },
-            { $push: { rolls: pick }, $setOnInsert: { id: message.author.id } },
+            { $push: { rolls: char.id }, $setOnInsert: { id: message.author.id } },
             { upsert: true }
         );
 
-        const rollMessage = await sendCharacter(message, pick, true);
+        const rollMessage = await sendCharacter(message, char, true);
         await rollMessage.react('💗');
 
         // Listen for reactions
@@ -191,14 +153,14 @@ async function roll(message, gender) {
         };
         rollMessage
             .awaitReactions({ filter, max: 1, time: 600000, errors: ['time'] })
-            .then(async (collected) => {
+            .then(async () => {
                 // Save character in DB
                 await User.updateOne(
                     { id: message.author.id },
-                    { $push: { dating: pick }, $setOnInsert: { id: message.author.id } },
+                    { $push: { dating: char.id }, $setOnInsert: { id: message.author.id } },
                     { upsert: true }
                 );
-                rollMessage.channel.send(`${message.author} is now dating ${pick.name}!`);
+                rollMessage.channel.send(`${message.author} is now dating ${char.name}!`);
             })
             .catch(() => {
                 rollMessage.reactions.removeAll();
@@ -246,26 +208,18 @@ async function searchCharacter(message, args) {
  *
  * @param {Discord.Message} message Discord message object
  * @param {string} search Name of the character to search for
- * @returns {Promise<Character>} Character object
+ * @returns {Promise<AnimeCharacter>} Character object
  */
 async function internalSearch(message, search) {
     try {
-        // Get character query list
-        const data = await fetch(
-            `https://www.animecharactersdatabase.com/api_series_characters.php?character_q=${search}`,
-            {
-                headers: {
-                    'User-Agent':
-                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:95.0) Gecko/20100101 Firefox/95.0',
-                },
-            }
-        ).then((res) => res.json());
-
-        // If no characters are found, send error message
-        if (data === -1) return null;
-
-        // Create character list
-        const characterList = data.search_results;
+        // Search for the character
+        const reg =
+            search
+                .trim()
+                .split(' ')
+                .map((s) => `(?=.*${s})`)
+                .join('') + '.*';
+        const characterList = await Character.find({ name: { $regex: reg, $options: 'i' } }).exec();
 
         // If there is only one character, return that character
         if (characterList.length === 1) {
@@ -328,8 +282,7 @@ async function internalSearch(message, search) {
 
                         // If the character is not found, send error message
                         if (!char) {
-                            queryMessage.channel.send('Invalid character number.');
-                            return resolve(null);
+                            return resolve(-1);
                         }
 
                         // Else, return the character
@@ -355,7 +308,7 @@ async function internalSearch(message, search) {
  *
  * @param {Discord.Message} message Discord message object
  * @param {string} search Original search query
- * @param {Character[]} characterList List of characters
+ * @param {AnimeCharacter[]} characterList List of characters
  * @param {number} page Page number
  * @param {Discord.Message} [prevMessage] If the message should be edited instead of sent, include this param
  * @returns {Promise<Discord.Message>} The picker message sent or edited
@@ -369,14 +322,12 @@ async function showPickerEmbed(message, search, characterList, page = 0, prevMes
     const desc = currList
         .map(
             (char, index) =>
-                `${page * 10 + index + 1}. **${char.name}** *(${char.gender})* - ${
-                    char.anime_name
-                }\n`
+                `${page * 10 + index + 1}. **${char.name}** - ${char.media}: ${char.mediaName}\n`
         )
         .join('');
     const embed = new Discord.MessageEmbed()
-        .setTitle(`Search results for *${search}* ${page > 0 ? `[Page ${page + 1}]` : ''}`)
-        .setDescription('**Enter a number to pick a character:**\n' + desc)
+        .setTitle('**Enter a number to pick a character:**\n')
+        .setDescription(desc)
         .setFooter(`Searched by ${message.author.username}`, message.author.avatarURL());
 
     // Edit or send message depending on if it is a recursive call
@@ -443,12 +394,11 @@ async function history(message, option) {
         // Arrow and cancel emoji actions
         if (reaction === REACT_EMOJIS[0]) {
             // Left arrow emoji
-            page = page > 0 ? page - 1 : page;
-            sendHistoryList(message, list, page, option, histMessage);
+            if (page > 0) sendHistoryList(message, list, --page, option, histMessage);
         } else if (reaction === REACT_EMOJIS[1]) {
             // Right arrow emoji
-            page = list.length > 10 * (page + 1) ? page + 1 : page;
-            sendHistoryList(message, list, page, option, histMessage);
+            if (list.length > 10 * (page + 1))
+                sendHistoryList(message, list, ++page, option, histMessage);
         }
     });
 }
@@ -477,21 +427,17 @@ async function simp(message, args) {
  * Send a specific character to the user
  *
  * @param {Discord.Message} message Discord message object
- * @param {Character} character Character object
+ * @param {AnimeCharacter} character Character object
  * @param {boolean} [isRoll] True if the character is a roll
  */
 async function sendCharacter(message, character, isRoll) {
     // Create MessageEmbed with info on character
     const embed = new Discord.MessageEmbed()
         .setTitle(character.name)
-        .setURL(`https://www.animecharactersdatabase.com/characters.php?id=${character.id}`)
+        .setURL(character.url)
         .setColor('#86f9f9')
-        .setDescription(
-            `**Gender**: ${character.gender}\n**Anime/Game**:  ${
-                character.origin || character.anime_name
-            }\n\n${character.desc}`
-        )
-        .setImage(character.character_image.replace(/\/.\//g, '/'));
+        .setDescription(`**${character.media}**:  ${character.mediaName}`)
+        .setImage(character.img);
 
     // Add rolled by footer
     if (isRoll) embed.setFooter(`Rolled by ${message.author.username}`, message.author.avatarURL());
@@ -504,7 +450,7 @@ async function sendCharacter(message, character, isRoll) {
  * Send list of characters from rolls/dating to user
  *
  * @param {Discord.Message} message Discord message object
- * @param {Character[]} characterList List of characters to send
+ * @param {AnimeCharacter[]} characterList List of characters to send
  * @param {number} [page] Page number
  * @param {number} option Dating list (1) or roll history (2)
  * @param {Discord.Message} [prevMessage] If the message should be edited instead of sent, include this param
@@ -512,9 +458,14 @@ async function sendCharacter(message, character, isRoll) {
  */
 async function sendHistoryList(message, characterList, page = 0, option, prevMessage) {
     const currList = characterList.slice(page * 10, (page + 1) * 10);
-    const desc = currList
-        .map((char) => `**${char.name}** *(${char.gender})* - ${char.anime_name || char.origin}\n`)
-        .join('');
+    const desc = (
+        await Promise.all(
+            currList.map(async (id) => {
+                const char = await Character.findOne({ id });
+                return `**${char.name}** - ${char.media}: ${char.mediaName}\n`;
+            })
+        )
+    ).join('');
     const embed = new Discord.MessageEmbed()
         .setTitle(
             `Characters ${message.author.username} ${
@@ -535,22 +486,16 @@ async function sendHistoryList(message, characterList, page = 0, option, prevMes
  * Shows a picture gallery of a character
  *
  * @param {Discord.Message} message Discord message object
- * @param {Character} character Character object
+ * @param {AnimeCharacter} character Character object
  */
 async function sendPictureGallery(message, character) {
-    const data = await fetch(
-        `${PINTEREST_1}${(
-            character.name +
-            ' ' +
-            (character.origin || character.anime_name)
-        ).replace(/ /g, '%20')}${PINTEREST_2}`,
-        {
-            headers: {
-                'User-Agent':
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:95.0) Gecko/20100101 Firefox/95.0',
-            },
-        }
-    ).then((res) => res.json());
+    const query = (character.name + ' ' + character.mediaName).replace(/ /g, '%20');
+    const data = await fetch(`${PINTEREST_1}${query}${PINTEREST_2}`, {
+        headers: {
+            'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:95.0) Gecko/20100101 Firefox/95.0',
+        },
+    }).then((res) => res.json());
 
     // Process data
     const rawList = data.resource_response.data.results;
@@ -565,7 +510,7 @@ async function sendPictureGallery(message, character) {
     let page = 0;
 
     // Create initial message
-    const pictureMessage = await displayPicture(message, name, imgList, page);
+    const pictureMessage = await displayPicture(message, name, character, imgList, page);
 
     // React with emojis
     react(pictureMessage, REACT_EMOJIS);
@@ -589,11 +534,11 @@ async function sendPictureGallery(message, character) {
         if (reaction === REACT_EMOJIS[0]) {
             // Left arrow emoji
             page = page > 0 ? page - 1 : page;
-            displayPicture(message, name, imgList, page, pictureMessage);
+            displayPicture(message, name, character, imgList, page, pictureMessage);
         } else if (reaction === REACT_EMOJIS[1]) {
             // Right arrow emoji
             page = imgList.length > page ? page + 1 : page;
-            displayPicture(message, name, imgList, page, pictureMessage);
+            displayPicture(message, name, character, imgList, page, pictureMessage);
         }
     });
 }
@@ -603,16 +548,18 @@ async function sendPictureGallery(message, character) {
  *
  * @param {Discord.Message} message Discord message object
  * @param {string} name Name of the character
+ * @param {AnimeCharacter} character Character object
  * @param {Object[]} imgList List of images to display
  * @param {number} page Page number
  * @param {Discord.Message} [prevMessage] If the message should be edited instead of sent, include this param
  */
-async function displayPicture(message, name, imgList, page = 0, prevMessage) {
+async function displayPicture(message, name, character, imgList, page = 0, prevMessage) {
     const embed = new Discord.MessageEmbed()
         .setTitle(`${name} (${page + 1}/${imgList.length})`)
         .setImage(imgList[page].url)
         .setURL(`https://www.pinterest.com/pin/${imgList[page].id}/`)
         .setColor(imgList[page].dominant_color)
+        .setDescription(`**${character.media}**:  ${character.mediaName}`)
         .setFooter(`Pictures requested by ${message.author.username}`, message.author.avatarURL());
 
     return prevMessage

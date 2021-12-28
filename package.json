@@ -6,12 +6,14 @@
   "dependencies": {
     "discord.js": "^13.4.0",
     "dotenv": "^10.0.0",
+    "he": "^1.2.0",
     "mongoose": "^6.1.3",
     "node-fetch": "2"
   },
   "scripts": {
     "start": "node app.js",
-    "dev": "nodemon app.js"
+    "dev": "nodemon app.js",
+    "scrape": "node scrape.js"
   },
   "devDependencies": {
     "nodemon": "^2.0.15"
