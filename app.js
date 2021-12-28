@@ -26,6 +26,7 @@ const HELP_MESSAGE = `**========================= Michae Bot Commands ==========
 
 :heart: **Dating** :heart:
 **!datelist (!dl)** - List all characters you are dating (heart react to date characters)
+**!breakup <name> [#] (!br <name> [#])** - Stop dating a character (IRREVERSIBLE!!!)
 
 :mag: **Search** :mag:
 **!search <name> (!s <name>)** - Search for a character by name
@@ -38,10 +39,6 @@ const PINTEREST_1 =
 const PINTEREST_2 =
     '%22%2C%22query_pin_sigs%22%3Anull%2C%22redux_normalize_feed%22%3Atrue%2C%22rs%22%3A%22typed%22%2C%22scope%22%3A%22pins%22%2C%22source_id%22%3Anull%2C%22no_fetch_context_on_resource%22%3Afalse%7D%2C%22context%22%3A%7B%7D%7D&_=1640629902230';
 let DB_COUNT = 0;
-
-// TODO: ADD THIS
-// **!date <name> [#] (!d <name> [#])** - Date a rolled character (up to the last 100 rolled)
-// **!breakup <name> [#] (!br <name> [#])** - Stop dating a character (IRREVERSIBLE!!!)
 
 // Character class
 class AnimeCharacter {
@@ -103,10 +100,10 @@ client.on('messageCreate', async (message) => {
         case 'rh':
             history(message, 2);
             break;
-        // case 'breakup':
-        // case 'br':
-        //     dateCharacter(message, args, 0);
-        //     break;
+        case 'breakup':
+        case 'br':
+            breakup(message, args);
+            break;
         case 'datelist':
         case 'dl':
             history(message, 1);
@@ -154,6 +151,13 @@ async function roll(message) {
         rollMessage
             .awaitReactions({ filter, max: 1, time: 600000, errors: ['time'] })
             .then(async () => {
+                // Make sure user is not already dating character
+                const dating = await User.findOne({ id: message.author.id, dating: char.id });
+                if (dating) {
+                    rollMessage.channel.send(`${message.author.username} You are already dating ${char.name}!`);
+                    return;
+                }
+                
                 // Save character in DB
                 await User.updateOne(
                     { id: message.author.id },
@@ -418,6 +422,52 @@ async function simp(message, args) {
         sendPictureGallery(message, char);
     } else {
         message.channel.send(`Couldn't find character **${name}**.`);
+    }
+}
+
+/**
+ * Breakup with a character, if they are in your dating list
+ * 
+ * @param {Discord.Message} message Discord message object
+ * @param {string[]} args List of arguments
+ * @returns 
+ */
+async function breakup(message, args) {
+    try {
+        // Get the character the user wants to break up with
+        const name = args.slice(1).join(' ');
+        const char = await internalSearch(message, name);
+
+        // If the character is not found, send error message
+        if (char === -1) return;
+        else if (char === null) {
+            message.channel.send(`Couldn't find character **${name}**.`);
+            return;
+        }
+
+        // Get the list of characters the user is currently dating
+        const userData = await User.findOne({ id: message.author.id });
+        if (!userData) {
+            message.channel.send('ERROR: Cannot get user data :(');
+            return;
+        }
+
+        // See if the character is in the user's list
+        const index = userData.dating.findIndex((id) => id === char.id);
+        if (index === -1) {
+            message.channel.send(`You are not currently dating **${char.name}**!`);
+            return;
+        }
+
+        // Remove the character from the user's list and save
+        userData.dating.splice(index, 1);
+        await userData.save();
+
+        // Send success message to user
+        message.channel.send(`You are no longer dating **${char.name}** :broken_heart:`);
+    } catch (err) {
+        console.error(err);
+        message.channel.send('ERROR: Could not break up due to internal server error :(');
     }
 }
 
